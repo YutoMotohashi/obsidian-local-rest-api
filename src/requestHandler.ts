@@ -1293,7 +1293,7 @@ export default class RequestHandler {
       // Return empty array if no cache is available
       res.json({
         path: file.path,
-        links: [],
+        wikilinks: [],
       });
       return;
     }
@@ -1308,7 +1308,7 @@ export default class RequestHandler {
 
     res.json({
       path: file.path,
-      links: wikilinks,
+      wikilinks: wikilinks,
     });
   }
 
