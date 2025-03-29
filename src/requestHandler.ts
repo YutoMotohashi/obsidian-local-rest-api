@@ -255,10 +255,10 @@ export default class RequestHandler {
       certificateInfo:
         this.requestIsAuthenticated(req) && certificate
           ? {
-              validityDays: getCertificateValidityDays(certificate),
-              regenerateRecommended:
-                !getCertificateIsUptoStandards(certificate),
-            }
+            validityDays: getCertificateValidityDays(certificate),
+            regenerateRecommended:
+              !getCertificateIsUptoStandards(certificate),
+          }
           : undefined,
       apiExtensions: this.requestIsAuthenticated(req)
         ? this.apiExtensions.map(({ manifest }) => manifest)
@@ -1256,6 +1256,9 @@ export default class RequestHandler {
 
     this.api.route("/open/*").post(this.openPost.bind(this));
 
+    this.api.route("/wikilinks/*").get(this.wikilinksGet.bind(this));
+    this.api.route("/backlinks/*").get(this.backlinksGet.bind(this));
+
     this.api.get(`/${CERT_NAME}`, this.certificateGet.bind(this));
     this.api.get("/", this.root.bind(this));
 
@@ -1263,5 +1266,128 @@ export default class RequestHandler {
 
     this.api.use(this.notFoundHandler.bind(this));
     this.api.use(this.errorHandler.bind(this));
+  }
+
+  async _wikilinksGet(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    if (!path || path.endsWith("/")) {
+      this.returnCannedResponse(res, {
+        errorCode: ErrorCode.RequestMethodValidOnlyForFiles,
+      });
+      return;
+    }
+
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      this.returnCannedResponse(res, {
+        statusCode: 404,
+      });
+      return;
+    }
+
+    const cache = this.app.metadataCache.getFileCache(file);
+    if (!cache) {
+      // Return empty array if no cache is available
+      res.json({
+        path: file.path,
+        links: [],
+      });
+      return;
+    }
+
+    // Extract links from the file's metadata cache
+    const links = cache.links || [];
+    const wikilinks = links.map(link => ({
+      target: link.link,
+      original: link.original,
+      // displayText: link.displayText,
+    }));
+
+    res.json({
+      path: file.path,
+      links: wikilinks,
+    });
+  }
+
+  async wikilinksGet(
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    const path = decodeURIComponent(
+      req.path.slice(req.path.indexOf("/", 1) + 1)
+    );
+
+    return this._wikilinksGet(path, req, res);
+  }
+
+  async _backlinksGet(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    if (!path || path.endsWith("/")) {
+      this.returnCannedResponse(res, {
+        errorCode: ErrorCode.RequestMethodValidOnlyForFiles,
+      });
+      return;
+    }
+
+    const targetFile = this.app.vault.getAbstractFileByPath(path);
+    if (!(targetFile instanceof TFile)) {
+      this.returnCannedResponse(res, {
+        statusCode: 404,
+      });
+      return;
+    }
+
+    const backlinks: {
+      source: string;
+      original: string;
+      // displayText?: string;
+    }[] = [];
+
+    // Iterate through all markdown files to find references to the target file
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      if (file.path === targetFile.path) {
+        continue; // Skip the target file itself
+      }
+
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (cache && cache.links) {
+        // Look for links that point to the target file
+        for (const link of cache.links) {
+          // Link resolution logic - check if the link points to our target file
+          // This is a simplified version - in Obsidian there's more complex path resolution
+          const linkedFile = this.app.metadataCache.getFirstLinkpathDest(link.link, file.path);
+
+          if (linkedFile && linkedFile.path === targetFile.path) {
+            backlinks.push({
+              source: file.path,
+              original: link.original,
+              // displayText: link.displayText,
+            });
+          }
+        }
+      }
+    }
+
+    res.json({
+      path: targetFile.path,
+      backlinks: backlinks,
+    });
+  }
+
+  async backlinksGet(
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    const path = decodeURIComponent(
+      req.path.slice(req.path.indexOf("/", 1) + 1)
+    );
+
+    return this._backlinksGet(path, req, res);
   }
 }
